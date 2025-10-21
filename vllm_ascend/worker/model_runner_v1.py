@@ -2269,6 +2269,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     self.kv_cache_config.kv_cache_groups):
                 block_table_tensor = self.input_batch.block_table[
                     kv_cache_group_id].get_device_tensor()
+                slot_mapping = self.input_batch.block_table[
+                    kv_cache_group_id].slot_mapping
                 common_attn_metadata = AscendCommonAttentionMetadata(
                     query_start_loc=torch.tensor(
                         [0] + self.actual_seq_lengths_q[:num_reqs],
@@ -2282,8 +2284,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     num_actual_tokens=num_tokens,
                     actual_seq_lengths_q=self.actual_seq_lengths_q,
                     block_table_tensor=block_table_tensor[:num_reqs],
-                    slot_mapping=self.input_batch.block_table[
-                        kv_cache_group_id].slot_mapping,
+                    slot_mapping=slot_mapping,
                     num_computed_tokens_cpu=num_computed_tokens_cpu,
                     positions=self.positions,
                     attn_mask=self.attn_mask,
