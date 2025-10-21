@@ -1470,7 +1470,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             else:
                 blk_table = self.input_batch.block_table[kv_cache_group_id]
                 blk_table_tensor = blk_table.get_device_tensor()
-                slot_mapping = blk_table.slot_mapping[:total_num_scheduled_tokens]
+                slot_mapping = blk_table.slot_mapping[:
+                                                      total_num_scheduled_tokens]
                 blk_table.slot_mapping[total_num_scheduled_tokens:].fill_(0)
 
             # Make AscendCommonAttentionMetadata
