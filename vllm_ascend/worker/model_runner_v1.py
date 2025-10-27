@@ -73,6 +73,8 @@ from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, DeviceMemoryProfiler,
                         is_pin_memory_available)
 from vllm.utils.jsontree import json_map_leaves
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadataBuilder
+from vllm.v1.attention.backends.mamba2_attn import \
+    Mamba2AttentionMetadataBuilder
 from vllm.v1.attention.backends.utils import (
     AttentionCGSupport, reorder_batch_to_split_decodes_and_prefills)
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
@@ -1509,8 +1511,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 common_prefix_len = 0
                 extra_attn_metadata_args = {}
                 builder = attn_group.get_metadata_builder()
-                if isinstance(builder, GDNAttentionMetadataBuilder
-                              ) or self.model_config.runner_type == "pooling":
+                if isinstance(builder, GDNAttentionMetadataBuilder) or \
+                    self.model_config.runner_type == "pooling" or \
+                    isinstance(builder, Mamba2AttentionMetadataBuilder):
                     if use_spec_decode:
                         extra_attn_metadata_args = dict(
                             num_accepted_tokens=self.num_accepted_tokens.
@@ -2935,7 +2938,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             # TODO: REFACTOR ME to sharing hybrid cache
             for idx in range(len(kv_cache_tensor.shared_by)):
                 layer_name = kv_cache_tensor.shared_by[idx]
-                if "linear_attn" in layer_name:
+                if "linear_attn" in layer_name or "mamba2" in layer_name:
                     # for mamba linear attention
                     for layer_name_inner in kv_cache_tensor.shared_by:
                         if ("attn" in layer_name_inner and "linear_attn" not in layer_name_inner) or \
