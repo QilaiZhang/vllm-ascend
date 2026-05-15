@@ -1,4 +1,5 @@
 # mypy: ignore-errors
+from math import lcm
 import vllm.model_executor.models.config
 from vllm.logger import init_logger
 from vllm.model_executor.models import ModelRegistry
@@ -67,12 +68,26 @@ def verify_and_update_config(cls, vllm_config) -> None:
 
     block_alignment_bytes = 128
 
-    # some attention backends (e.g. FA) only support setting
-    # block size to multiple of 16, so let's suggest a value
-    # that would work (note: FA is currently not compatible
-    # with mamba layers, use FlashInfer instead).
-    attn_block_size = block_alignment_bytes * cdiv(
-        mamba_page_size, block_alignment_bytes * attn_page_size_1_token)
+    if cache_config.enable_prefix_caching:
+        base_chunk_size = cache_config.mamba_block_size or model_config.get_mamba_chunk_size()
+        attn_token_per_mamba_state = cdiv(mamba_page_size, attn_page_size_1_token)
+        if base_chunk_size is None:
+            chunk_size = block_alignment_bytes
+        else:
+            chunk_size = lcm(base_chunk_size, block_alignment_bytes)
+        attn_block_size = chunk_size * cdiv(attn_token_per_mamba_state, chunk_size)
+        cache_config.mamba_block_size = attn_block_size
+    else:
+        # Without prefix caching, select minium valid attention block size
+        # to minimize mamba state padding
+
+        # some attention backends (e.g. FA) only support setting
+        # block size to multiple of 16, so let's suggest a value
+        # that would work (note: FA is currently not compatible
+        # with mamba layers, use FlashInfer instead).
+        attn_block_size = block_alignment_bytes * cdiv(
+            mamba_page_size, block_alignment_bytes * attn_page_size_1_token)
+        cache_config.mamba_block_size = model_config.max_model_len
 
     # override attention block size if either (a) the
     # user has not set it or (b) the user has set it

@@ -212,6 +212,7 @@ def torch_chunk_gated_delta_rule(
     initial_state=None,
     output_final_state=False,
     use_qk_l2norm_in_kernel=False,
+    return_intermediate_states=False
 ):
     initial_dtype = query.dtype
     if use_qk_l2norm_in_kernel:
@@ -272,7 +273,7 @@ def torch_chunk_gated_delta_rule(
                                  dtype=torch.bool,
                                  device=query.device),
                       diagonal=1)
-
+    intermediate_states = []
     # for each chunk
     for i in range(0, tot_heads // chunk_size):
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
@@ -287,6 +288,8 @@ def torch_chunk_gated_delta_rule(
             (k_i *
              (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(
                  -1, -2) @ v_new)
+        if return_intermediate_states:
+            intermediate_states.append(last_recurrent_state)
 
     if not output_final_state:
         last_recurrent_state = None
@@ -296,4 +299,4 @@ def torch_chunk_gated_delta_rule(
     core_attn_out = core_attn_out[:, :, :num_heads]
     core_attn_out = core_attn_out.transpose(1,
                                             2).contiguous().to(initial_dtype)
-    return core_attn_out, last_recurrent_state
+    return core_attn_out, last_recurrent_state, intermediate_states
