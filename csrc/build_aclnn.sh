@@ -115,8 +115,12 @@ elif [[ "$SOC_VERSION" =~ ^ascend910b ]]; then
         "hamming_dist_top_k"
         "reshape_and_cache_bnsd"
         "recurrent_gated_delta_rule"
+<<<<<<< HEAD
         "fused_gdn_gating"
         "ngram_spec_decode"
+=======
+        "fused_sigmoid_gating_delta_rule_update"
+>>>>>>> edfded3a (implement AscendC fused_sigmoid_gating_delta_rule_update)
         "chunk_fwd_o"
         "chunk_gated_delta_rule_fwd_h"
     )
@@ -199,8 +203,12 @@ elif [[ "$SOC_VERSION" =~ ^ascend910_93 ]]; then
         "hamming_dist_top_k"
         "reshape_and_cache_bnsd"
         "recurrent_gated_delta_rule"
+<<<<<<< HEAD
         "fused_gdn_gating"
         "ngram_spec_decode"
+=======
+        "fused_sigmoid_gating_delta_rule_update"
+>>>>>>> edfded3a (implement AscendC fused_sigmoid_gating_delta_rule_update)
         "chunk_fwd_o"
         "chunk_gated_delta_rule_fwd_h"
     )
