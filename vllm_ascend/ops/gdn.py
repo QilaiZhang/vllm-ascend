@@ -65,6 +65,10 @@ def get_non_spec_chunked_prefill_meta(attn_metadata):
     return fallback_meta.chunk
 
 
+def _cu_seqlens_to_actual(cu_seqlens: torch.Tensor) -> torch.Tensor:
+    return torch.cat([cu_seqlens[:1], cu_seqlens[1:] - cu_seqlens[:-1]])
+
+
 def npu_fused_sigmoid_gating_delta_rule_update(
     A_log: torch.Tensor,
     a: torch.Tensor,
@@ -74,7 +78,7 @@ def npu_fused_sigmoid_gating_delta_rule_update(
     k: torch.Tensor,
     v: torch.Tensor,
     initial_state: torch.Tensor,
-    cu_seqlens: torch.Tensor,
+    actual_seq_lengths: torch.Tensor,
     ssm_state_indices: torch.Tensor,
     num_accepted_tokens: torch.Tensor | None = None,
     use_qk_l2norm_in_kernel: bool = True,
@@ -83,13 +87,15 @@ def npu_fused_sigmoid_gating_delta_rule_update(
         q = l2norm_fwd(q)
         k = l2norm_fwd(k)
 
-    A_log = A_log.to(torch.float32).contiguous()
-    dt_bias = dt_bias.to(torch.float32).contiguous()
-    actual_seq_lengths = torch.cat([cu_seqlens[:1], cu_seqlens[1:] - cu_seqlens[:-1]])
+    if A_log.dtype != torch.float32:
+        A_log = A_log.to(torch.float32)
+    if dt_bias.dtype != torch.float32:
+        dt_bias = dt_bias.to(torch.float32)
+
     out = torch.ops._C_ascend.npu_fused_sigmoid_gating_delta_rule_update(
         A_log,
-        a.contiguous(),
-        b.contiguous(),
+        a,
+        b,
         dt_bias,
         q.squeeze(0).contiguous(),
         k.squeeze(0).contiguous(),
@@ -329,6 +335,7 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
 
         # 2.1: Process the multi-query part
         if spec_sequence_masks is not None:
+            spec_cu_seqlens = spec_query_start_loc[: attn_metadata.num_spec_decodes + 1]
             core_attn_out_spec, last_recurrent_state = npu_fused_sigmoid_gating_delta_rule_update(
                 A_log=self.A_log,
                 a=a_spec,
@@ -338,7 +345,7 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
                 k=key_spec,
                 v=value_spec,
                 initial_state=ssm_state,
-                cu_seqlens=spec_query_start_loc[: attn_metadata.num_spec_decodes + 1],
+                actual_seq_lengths=_cu_seqlens_to_actual(spec_cu_seqlens),
                 ssm_state_indices=spec_state_indices_tensor.flatten(),
                 num_accepted_tokens=num_accepted_tokens.to(torch.int32),
                 use_qk_l2norm_in_kernel=True,
@@ -373,6 +380,7 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
             else:
                 a_non_spec = a
                 b_non_spec = b
+            non_spec_cu_seqlens = non_spec_query_start_loc[: attn_metadata.num_decodes + 1]
             core_attn_out_non_spec, last_recurrent_state = npu_fused_sigmoid_gating_delta_rule_update(
                 A_log=self.A_log,
                 a=a_non_spec,
@@ -382,7 +390,7 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
                 k=key_non_spec,
                 v=value_non_spec,
                 initial_state=ssm_state,
-                cu_seqlens=non_spec_query_start_loc[: attn_metadata.num_decodes + 1],
+                actual_seq_lengths=_cu_seqlens_to_actual(non_spec_cu_seqlens),
                 ssm_state_indices=non_spec_state_indices_tensor,
                 use_qk_l2norm_in_kernel=True,
             )

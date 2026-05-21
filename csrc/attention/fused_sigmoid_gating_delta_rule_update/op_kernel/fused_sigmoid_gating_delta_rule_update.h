@@ -422,11 +422,18 @@ private:
 
     __aicore__ inline void CopyInGamaBeta(int32_t seq0, int32_t seq1)
     {
+        // Fully vectorized version of the GDN gating + sigmoid-beta computation.
+        // Computes per-element:
+        //   g    = exp(-exp(A_log[h]) * softplus(a[i,h] + dt_bias[h], beta, thr))
+        //   beta = sigmoid(b[i,h]) = 1 / (1 + exp(-b[i,h]))
+        // where softplus(x, beta, thr) = x if beta*x > thr else (1/beta)*ln(1+exp(beta*x)).
         int32_t seqLen = seq1 - seq0;
-        uint64_t bBatchSize = Ceil(seqLen * NV_, BF16_NUM_PER_BLOCK) * BF16_NUM_PER_BLOCK;
+        uint64_t totalSize = static_cast<uint64_t>(seqLen) * NV_;
+        uint64_t bBatchSize = Ceil(totalSize, static_cast<uint64_t>(BF16_NUM_PER_BLOCK)) * BF16_NUM_PER_BLOCK;
         uint64_t headParamSize = Ceil(NV_, FP32_NUM_PER_BLOCK) * FP32_NUM_PER_BLOCK;
         DataCopyPadParams padParams;
 
+        // (1) Load A_log, dt_bias and pre-compute A_log <- exp(A_log).
         LocalTensor<float> aLogLocal = aLogInQueue_.AllocTensor<float>();
         LocalTensor<float> dtBiasLocal = dtBiasInQueue_.AllocTensor<float>();
         DataCopyParams headParamInParams{1, static_cast<uint16_t>(NV_ * sizeof(float)), 0, 0};
@@ -438,6 +445,7 @@ private:
         dtBiasInUb = dtBiasInQueue_.DeQue<float>();
         Exp(aLogInUb, aLogInUb, headParamSize);
 
+        // (2) Load a, b and cast to fp32.
         LocalTensor<inType> aLocal = aInQueue_.AllocTensor<inType>();
         LocalTensor<inType> bLocal = bInQueue_.AllocTensor<inType>();
         DataCopyParams gateInParams{1, static_cast<uint16_t>(seqLen * NV_ * sizeof(inType)), 0, 0};
@@ -453,41 +461,68 @@ private:
         Cast(betaInUb, bLocal, AscendC::RoundMode::CAST_NONE, bBatchSize);
         aInQueue_.FreeTensor(aLocal);
         bInQueue_.FreeTensor(bLocal);
-
-        for (uint64_t i = 0; i < static_cast<uint64_t>(seqLen) * NV_; ++i) {
-            uint64_t headIdx = i % NV_;
-            float x = gamaLocal.GetValue(i) + dtBiasInUb.GetValue(headIdx);
-            if (softplusBeta_ != 1.0f) {
-                x = x * softplusBeta_;
-            }
-            gamaLocal.SetValue(i, x);
-            float negB = -betaInUb.GetValue(i);
-            betaInUb.SetValue(i, negB);
-        }
-        Exp(gamaLocal, gamaLocal, seqLen * NV_);
-        Exp(betaInUb, betaInUb, seqLen * NV_);
-        AscendC::PipeBarrier<PIPE_V>();
-        Adds(gamaLocal, gamaLocal, 1.0f, seqLen * NV_);
-        Adds(betaInUb, betaInUb, 1.0f, seqLen * NV_);
-        Ln(gamaLocal, gamaLocal, seqLen * NV_);
         AscendC::PipeBarrier<PIPE_V>();
 
-        for (uint64_t i = 0; i < static_cast<uint64_t>(seqLen) * NV_; ++i) {
-            uint64_t headIdx = i % NV_;
-            float softplusValue = gamaLocal.GetValue(i);
-            if (softplusBeta_ != 1.0f) {
-                softplusValue = softplusValue / softplusBeta_;
-            }
-            float x = ToFloat(aGm_.GetValue(seq0 * NV_ + i)) + dtBiasInUb.GetValue(headIdx);
-            if (x > softplusThreshold_) {
-                softplusValue = x;
-            }
-            float decay = -aLogInUb.GetValue(headIdx) * softplusValue;
-            gamaLocal.SetValue(i, decay);
-            betaInUb.SetValue(i, 1.0f / betaInUb.GetValue(i));
+        // (3) gamaLocal[i, h] <- a[i, h] + dt_bias[h] (broadcast dt_bias along seq).
+        //     seqLen <= MAX_MTP = 8, so this loop emits at most 8 vector ops.
+        for (uint32_t row = 0; row < static_cast<uint32_t>(seqLen); ++row) {
+            Add(gamaLocal[row * NV_], gamaLocal[row * NV_], dtBiasInUb, NV_);
         }
-        Exp(gamaLocal, gamaLocal, seqLen * NV_);
         AscendC::PipeBarrier<PIPE_V>();
+
+        // (4) Compute softplus(x, beta, thr) into broadTmpInUb, keeping x in gamaLocal.
+        //     The PyTorch softplus fallback (x when beta*x > thr) is preserved via Compare/Select.
+        //     broadTmpInUb is free during CopyInGamaBeta (only used inside ProcessHead).
+        //     stateInUb is also free here and serves as the uint8 mask buffer.
+        auto maskBuf = stateInUb.template ReinterpretCast<uint8_t>();
+        if (softplusBeta_ != 1.0f) {
+            // scaled = beta * x
+            Muls(broadTmpInUb, gamaLocal, softplusBeta_, bBatchSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            // mask = (scaled > thr)
+            CompareScalar(maskBuf, broadTmpInUb, softplusThreshold_,
+                          AscendC::CMPMODE::GT, bBatchSize);
+            // softplus_scaled = ln(1 + exp(scaled))
+            Exp(broadTmpInUb, broadTmpInUb, bBatchSize);
+            Adds(broadTmpInUb, broadTmpInUb, 1.0f, bBatchSize);
+            Ln(broadTmpInUb, broadTmpInUb, bBatchSize);
+            // softplus = softplus_scaled / beta
+            Muls(broadTmpInUb, broadTmpInUb, 1.0f / softplusBeta_, bBatchSize);
+        } else {
+            // beta == 1 fast path: compare directly against x.
+            CompareScalar(maskBuf, gamaLocal, softplusThreshold_,
+                          AscendC::CMPMODE::GT, bBatchSize);
+            Exp(broadTmpInUb, gamaLocal, bBatchSize);
+            Adds(broadTmpInUb, broadTmpInUb, 1.0f, bBatchSize);
+            Ln(broadTmpInUb, broadTmpInUb, bBatchSize);
+        }
+        AscendC::PipeBarrier<PIPE_V>();
+        // Apply fallback: where mask, softplus <- x.
+        Select(broadTmpInUb, maskBuf, gamaLocal, broadTmpInUb,
+               AscendC::SELMODE::VSEL_TENSOR_TENSOR_MODE, bBatchSize);
+        AscendC::PipeBarrier<PIPE_V>();
+
+        // (5) g = exp(-exp(A_log) * softplus(x)); broadcast A_log along seq.
+        for (uint32_t row = 0; row < static_cast<uint32_t>(seqLen); ++row) {
+            Mul(gamaLocal[row * NV_], broadTmpInUb[row * NV_], aLogInUb, NV_);
+        }
+        AscendC::PipeBarrier<PIPE_V>();
+        Muls(gamaLocal, gamaLocal, -1.0f, bBatchSize);
+        AscendC::PipeBarrier<PIPE_V>();
+        Exp(gamaLocal, gamaLocal, bBatchSize);
+        AscendC::PipeBarrier<PIPE_V>();
+
+        // (6) beta <- sigmoid(b) = 1 / (1 + exp(-b)).
+        Muls(betaInUb, betaInUb, -1.0f, bBatchSize);
+        AscendC::PipeBarrier<PIPE_V>();
+        Exp(betaInUb, betaInUb, bBatchSize);
+        Adds(betaInUb, betaInUb, 1.0f, bBatchSize);
+        AscendC::PipeBarrier<PIPE_V>();
+        Duplicate(broadTmpInUb, 1.0f, bBatchSize);  // 1's tensor for Div
+        AscendC::PipeBarrier<PIPE_V>();
+        Div(betaInUb, broadTmpInUb, betaInUb, bBatchSize);
+        AscendC::PipeBarrier<PIPE_V>();
+
         gamaInQueue_.EnQue<float>(gamaLocal);
         gamaInUb = gamaInQueue_.DeQue<float>();
     }
