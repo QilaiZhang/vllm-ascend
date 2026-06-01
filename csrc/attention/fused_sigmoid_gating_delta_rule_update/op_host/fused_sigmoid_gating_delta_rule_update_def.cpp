@@ -87,6 +87,7 @@ public:
         this->Attr("softplus_beta").AttrType(OPTIONAL).Float(1.0);
         this->Attr("softplus_threshold").AttrType(OPTIONAL).Float(20.0);
         
+        // ascend910b (A2): softsync.flag mitigates A2's weaker native sync.
         OpAICoreConfig aicConfig;
         aicConfig.DynamicCompileStaticFlag(true)
             .DynamicFormatFlag(true)
@@ -95,7 +96,25 @@ public:
             .NeedCheckSupportFlag(false)
             .ExtendCfgInfo("softsync.flag", "true");
         this->AICore().AddConfig("ascend910b", aicConfig);
-        this->AICore().AddConfig("ascend910_93", aicConfig);
+
+        // ascend910_93 (A3): native sync is stronger; softsync adds overhead.
+        OpAICoreConfig aicConfig93;
+        aicConfig93.DynamicCompileStaticFlag(true)
+            .DynamicFormatFlag(true)
+            .DynamicRankSupportFlag(true)
+            .DynamicShapeSupportFlag(true)
+            .NeedCheckSupportFlag(false);
+        this->AICore().AddConfig("ascend910_93", aicConfig93);
+
+        // ascend950 (A5): declare aclnn support for the runtime.
+        OpAICoreConfig aicConfig950;
+        aicConfig950.DynamicCompileStaticFlag(true)
+            .DynamicFormatFlag(true)
+            .DynamicRankSupportFlag(true)
+            .DynamicShapeSupportFlag(true)
+            .NeedCheckSupportFlag(false)
+            .ExtendCfgInfo("aclnnSupport.value", "support_aclnn");
+        this->AICore().AddConfig("ascend950", aicConfig950);
     }
 };
 
