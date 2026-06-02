@@ -442,6 +442,8 @@ private:
         aLogInUb = aLogInQueue_.DeQue<float>();
         dtBiasInUb = dtBiasInQueue_.DeQue<float>();
         Exp(aLogInUb, aLogInUb, headParamSize);
+        Muls(aLogInUb, aLogInUb, -1.0f, headParamSize);
+        AscendC::PipeBarrier<PIPE_V>();
 
         LocalTensor<inType> aLocal = aInQueue_.AllocTensor<inType>();
         LocalTensor<inType> bLocal = bInQueue_.AllocTensor<inType>();
@@ -455,44 +457,67 @@ private:
 
         LocalTensor<float> gamaLocal = gamaInQueue_.AllocTensor<float>();
         Cast(gamaLocal, aLocal, AscendC::RoundMode::CAST_NONE, bBatchSize);
-        Cast(betaInUb, bLocal, AscendC::RoundMode::CAST_NONE, bBatchSize);
-        bInQueue_.FreeTensor(bLocal);
-
-        for (uint64_t i = 0; i < static_cast<uint64_t>(seqLen) * NV_; ++i) {
-            uint64_t headIdx = i % NV_;
-            float x = gamaLocal.GetValue(i) + dtBiasInUb.GetValue(headIdx);
-            if (softplusBeta_ != 1.0f) {
-                x = x * softplusBeta_;
-            }
-            gamaLocal.SetValue(i, x);
-            float negB = -betaInUb.GetValue(i);
-            betaInUb.SetValue(i, negB);
-        }
-        Exp(gamaLocal, gamaLocal, seqLen * NV_);
-        Exp(betaInUb, betaInUb, seqLen * NV_);
-        AscendC::PipeBarrier<PIPE_V>();
-        Adds(gamaLocal, gamaLocal, 1.0f, seqLen * NV_);
-        Adds(betaInUb, betaInUb, 1.0f, seqLen * NV_);
-        Ln(gamaLocal, gamaLocal, seqLen * NV_);
         AscendC::PipeBarrier<PIPE_V>();
 
-        for (uint64_t i = 0; i < static_cast<uint64_t>(seqLen) * NV_; ++i) {
-            uint64_t headIdx = i % NV_;
-            float softplusValue = gamaLocal.GetValue(i);
-            if (softplusBeta_ != 1.0f) {
-                softplusValue = softplusValue / softplusBeta_;
-            }
-            float x = ToFloat(aLocal.GetValue(i)) + dtBiasInUb.GetValue(headIdx);
-            if (x > softplusThreshold_) {
-                softplusValue = x;
-            }
-            float decay = -aLogInUb.GetValue(headIdx) * softplusValue;
-            gamaLocal.SetValue(i, decay);
-            betaInUb.SetValue(i, 1.0f / betaInUb.GetValue(i));
+        uint32_t gateCount = static_cast<uint32_t>(seqLen * NV_);
+        for (int32_t row = 0; row < seqLen; ++row) {
+            uint32_t rowOffset = static_cast<uint32_t>(row) * NV_;
+            Add(gamaLocal[rowOffset], gamaLocal[rowOffset], dtBiasInUb, NV_);
         }
+        AscendC::PipeBarrier<PIPE_V>();
+
+        if (softplusBeta_ != 1.0f) {
+            Muls(gamaLocal, gamaLocal, softplusBeta_, gateCount);
+            AscendC::PipeBarrier<PIPE_V>();
+        }
+
+        // softplus(x) = max(x, 0) + ln(1 + exp(-abs(x))).
+        // This matches the vectorized baseline gating path and avoids per-head scalar GetValue/SetValue loops.
+        Abs(betaInUb, gamaLocal, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Muls(betaInUb, betaInUb, -1.0f, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Exp(betaInUb, betaInUb, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Adds(betaInUb, betaInUb, 1.0f, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Ln(betaInUb, betaInUb, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Maxs(gamaLocal, gamaLocal, 0.0f, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Add(gamaLocal, gamaLocal, betaInUb, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        if (softplusBeta_ != 1.0f) {
+            Muls(gamaLocal, gamaLocal, 1.0f / softplusBeta_, gateCount);
+            AscendC::PipeBarrier<PIPE_V>();
+        }
+
+        for (int32_t row = 0; row < seqLen; ++row) {
+            uint32_t rowOffset = static_cast<uint32_t>(row) * NV_;
+            Mul(gamaLocal[rowOffset], gamaLocal[rowOffset], aLogInUb, NV_);
+        }
+        AscendC::PipeBarrier<PIPE_V>();
         Exp(gamaLocal, gamaLocal, seqLen * NV_);
         AscendC::PipeBarrier<PIPE_V>();
         aInQueue_.FreeTensor(aLocal);
+
+        Cast(betaInUb, bLocal, AscendC::RoundMode::CAST_NONE, bBatchSize);
+        bInQueue_.FreeTensor(bLocal);
+        AscendC::PipeBarrier<PIPE_V>();
+        Muls(betaInUb, betaInUb, -1.0f, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Exp(betaInUb, betaInUb, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Adds(betaInUb, betaInUb, 1.0f, gateCount);
+        AscendC::PipeBarrier<PIPE_V>();
+        Duplicate(dtBiasInUb, 1.0f, NV_);
+        AscendC::PipeBarrier<PIPE_V>();
+        for (int32_t row = 0; row < seqLen; ++row) {
+            uint32_t rowOffset = static_cast<uint32_t>(row) * NV_;
+            Div(betaInUb[rowOffset], dtBiasInUb, betaInUb[rowOffset], NV_);
+        }
+        AscendC::PipeBarrier<PIPE_V>();
+
         gamaInQueue_.EnQue<float>(gamaLocal);
         gamaInUb = gamaInQueue_.DeQue<float>();
     }
