@@ -69,7 +69,7 @@ static const std::initializer_list<op::DataType> OUT_TYPE_SUPPORT_LIST = {op::Da
 
 static inline bool CheckNotNull(const FusedSigmoidGatingDeltaRuleUpdateParams &params)
 {
-    // 蹇呴€夊弬鏁?
+    // 必选参数
     OP_CHECK_NULL(params.a_log, return false);
     OP_CHECK_NULL(params.a, return false);
     OP_CHECK_NULL(params.b, return false);
@@ -87,7 +87,7 @@ static inline bool CheckNotNull(const FusedSigmoidGatingDeltaRuleUpdateParams &p
 
 static inline bool CheckDtypeVaild(const FusedSigmoidGatingDeltaRuleUpdateParams &params)
 {
-    // 妫€鏌ュ繀閫夊弬鏁版暟鎹被鍨?
+    // 检查必选参数数据类型
     OP_CHECK_DTYPE_NOT_SUPPORT(params.a_log, HEAD_PARAM_TYPE_SUPPORT_LIST, return false);
     OP_CHECK_DTYPE_NOT_SUPPORT(params.a, GATE_TYPE_SUPPORT_LIST, return false);
     OP_CHECK_DTYPE_NOT_SUPPORT(params.b, GATE_TYPE_SUPPORT_LIST, return false);
@@ -109,7 +109,7 @@ static inline bool CheckDtypeVaild(const FusedSigmoidGatingDeltaRuleUpdateParams
 
 static aclnnStatus CheckParams(FusedSigmoidGatingDeltaRuleUpdateParams &params)
 {
-    // 妫€鏌ヨ緭鍏ュ弬鏁版槸鍚﹀湪鏀寔鐨勬暟鎹被鍨嬭寖鍥村唴
+    // 检查输入参数是否在支持的数据类型范围内
     CHECK_RET(CheckDtypeVaild(params), ACLNN_ERR_PARAM_INVALID);
 
     OP_LOGD("FusedSigmoidGatingDeltaRuleUpdate check params success.");
@@ -177,7 +177,7 @@ aclnnStatus aclnnFusedSigmoidGatingDeltaRuleUpdateGetWorkspaceSize(const aclTens
 
     auto out_ = l0op::Contiguous(out, uniqueExecutor.get());
 
-    // 璋冪敤l0鎺ュ彛
+    // 调用l0接口
     auto outRet =
         l0op::FusedSigmoidGatingDeltaRuleUpdate(aLog_, a_, b_, dtBias_, query_, key_, value_, stateRef,
                                                 actualSeqLengths_, ssmStateIndices_, numAcceptedTokens, scaleValue,
@@ -191,7 +191,7 @@ aclnnStatus aclnnFusedSigmoidGatingDeltaRuleUpdateGetWorkspaceSize(const aclTens
         return ACLNN_ERR_INNER_NULLPTR;
     }
 
-    // 鑾峰彇璁＄畻杩囩▼涓渶瑕佷娇鐢ㄧ殑workspace澶у皬銆?
+    // 获取计算过程中需要使用的workspace大小。
     *workspaceSize = uniqueExecutor->GetWorkspaceSize();
     uniqueExecutor.ReleaseTo(executor);
     return ACLNN_SUCCESS;

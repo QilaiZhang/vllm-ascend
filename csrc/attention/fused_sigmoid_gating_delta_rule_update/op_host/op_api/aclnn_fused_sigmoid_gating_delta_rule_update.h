@@ -17,22 +17,25 @@ extern "C" {
 #endif
 
 /**
- * @brief FusedSigmoidGatingDeltaRuleUpdate 鐨勭涓€娈垫帴鍙ｏ紝鏍规嵁鍏蜂綋鐨勮绠楁祦绋嬶紝璁＄畻workspace澶у皬銆?
- * @param [in] query: 鏁版嵁绫诲瀷鏀寔锛歜float16銆?
- * @param [in] key: 鏁版嵁绫诲瀷鏀寔锛歜float16銆?
- * @param [in] value: 鏁版嵁绫诲瀷鏀寔锛歜float16銆?
- * @param [in] beta: 鏁版嵁绫诲瀷鏀寔锛歜float16銆?
- * @param [in] state: 鏁版嵁绫诲瀷鏀寔锛歜float16銆?
- * @param [in] actualSeqLengths: 鏁版嵁绫诲瀷鏀寔锛歩nt32銆?
- * @param [in] ssmStateIndices: 鏁版嵁绫诲瀷鏀寔锛歩nt32銆?
- * @param [in] g: 鏁版嵁绫诲瀷鏀寔锛歠loat32銆?
- * @param [in] gk: 鏁版嵁绫诲瀷鏀寔锛歠loat32銆?
- * @param [in] numAcceptedTokens: 鏁版嵁绫诲瀷鏀寔锛歩nt32銆?
- * @param [in] scaleValue: 鏁版嵁绫诲瀷鏀寔锛歠loat32銆?
- * @param [out] out: 鏁版嵁绫诲瀷鏀寔锛歜float16銆?
- * @param [out] 杩斿洖闇€瑕佸湪npu device渚х敵璇风殑workspace澶у皬銆?
- * @param [out] executor: 杩斿洖op鎵ц鍣紝鍖呭惈浜嗙畻瀛愯绠楁祦绋嬨€?
- * @return aclnnStatus: 杩斿洖鐘舵€佺爜
+ * @brief FusedSigmoidGatingDeltaRuleUpdate的第一段接口，根据具体的计算流程计算workspace大小。
+ * @param [in] aLog: 数据类型支持float32。
+ * @param [in] a: 数据类型支持bfloat16。
+ * @param [in] b: 数据类型支持bfloat16。
+ * @param [in] dtBias: 数据类型支持float32。
+ * @param [in] query: 数据类型支持bfloat16。
+ * @param [in] key: 数据类型支持bfloat16。
+ * @param [in] value: 数据类型支持bfloat16。
+ * @param [in,out] stateRef: 数据类型支持bfloat16和float32。
+ * @param [in] actualSeqLengths: 数据类型支持int32。
+ * @param [in] ssmStateIndices: 数据类型支持int32。
+ * @param [in] numAcceptedTokens: 数据类型支持int32，可选输入。
+ * @param [in] scaleValue: 数据类型支持float32。
+ * @param [in] softplusBeta: 数据类型支持float32。
+ * @param [in] softplusThreshold: 数据类型支持float32。
+ * @param [out] out: 数据类型支持bfloat16。
+ * @param [out] workspaceSize: 返回需要在npu device侧申请的workspace大小。
+ * @param [out] executor: 返回op执行器，包含了算子计算流程。
+ * @return aclnnStatus: 返回状态码。
  */
 __attribute__((visibility("default"))) aclnnStatus aclnnFusedSigmoidGatingDeltaRuleUpdateGetWorkspaceSize(
     const aclTensor *aLog, const aclTensor *a, const aclTensor *b, const aclTensor *dtBias,
@@ -42,13 +45,13 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedSigmoidGatingDeltaR
     aclOpExecutor **executor);
 
 /**
- * @brief 
- * @param [in] workspace: 鍦╪pu device渚х敵璇风殑workspace鍐呭瓨璧峰潃銆?
- * @param [in] workspace_size: 鍦╪pu
- * device渚х敵璇风殑workspace澶у皬锛岀敱绗竴娈垫帴鍙clnnFusedSigmoidGatingDeltaRuleUpdateGetWorkspaceSize鑾峰彇銆?
- * @param [in] executor: op鎵ц鍣紝鍖呭惈浜嗙畻瀛愯绠楁祦绋嬨€?
- * @param [in] stream: acl stream娴併€?
- * @return aclnnStatus: 杩斿洖鐘舵€佺爜
+ * @brief FusedSigmoidGatingDeltaRuleUpdate的第二段接口，用于执行算子。
+ * @param [in] workspace: 在npu device侧申请的workspace内存起始地址。
+ * @param [in] workspaceSize:
+ * 在npu device侧申请的workspace大小，由第一段接口aclnnFusedSigmoidGatingDeltaRuleUpdateGetWorkspaceSize获取。
+ * @param [in] executor: op执行器，包含了算子计算流程。
+ * @param [in] stream: acl stream流。
+ * @return aclnnStatus: 返回状态码。
  */
 __attribute__((visibility("default"))) aclnnStatus aclnnFusedSigmoidGatingDeltaRuleUpdate(void *workspace, uint64_t workspaceSize, aclOpExecutor *executor,
                                                    aclrtStream stream);

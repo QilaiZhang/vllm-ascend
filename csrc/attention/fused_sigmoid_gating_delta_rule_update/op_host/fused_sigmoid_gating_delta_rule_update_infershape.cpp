@@ -7,7 +7,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-/* !
+/*!
  * \file fused_sigmoid_gating_delta_rule_update_infershape.cpp
  * \brief
  */

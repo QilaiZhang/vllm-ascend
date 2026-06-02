@@ -18,7 +18,7 @@
 
 namespace FusedSigmoidGatingDeltaRuleUpdate {
 #pragma pack(push, 8)
-struct alignas(8) FusedSigmoidGatingDeltaRuleUpdateTilingData { // alignas(8)纭繚8瀛楄妭瀵归綈
+struct alignas(8) FusedSigmoidGatingDeltaRuleUpdateTilingData { // alignas(8)确保8字节对齐
     uint32_t vectorCoreNum;
     uint32_t ubCalSize;
     uint32_t ubRestBytes;

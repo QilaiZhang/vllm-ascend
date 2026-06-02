@@ -46,19 +46,19 @@ protected:
     {
         return true;
     }
-    // 1銆佽幏鍙栧钩鍙颁俊鎭瘮濡侰oreNum銆乁B/L1/L0C璧勬簮澶у皬
+    // 1、获取平台信息比如CoreNum、UB/L1/L0C资源大小
     ge::graphStatus GetPlatformInfo() override;
-    // 2銆佽幏鍙朓NPUT/OUTPUT/ATTR淇℃伅
+    // 2、获取INPUT/OUTPUT/ATTR信息
     ge::graphStatus GetShapeAttrsInfo() override;
-    // 3銆佽绠楁暟鎹垏鍒員ilingData
+    // 3、计算数据切分TilingData
     ge::graphStatus DoOpTiling() override;
-    // 4銆佽绠楅珮闃禔PI鐨凾ilingData
+    // 4、计算高阶API的TilingData
     ge::graphStatus DoLibApiTiling() override;
-    // 5銆佽绠桾ilingKey
+    // 5、计算TilingKey
     uint64_t GetTilingKey() const override;
-    // 6銆佽绠梂orkspace 澶у皬
+    // 6、计算Workspace大小
     ge::graphStatus GetWorkspaceSize() override;
-    // 7銆佷繚瀛楾iling鏁版嵁
+    // 7、保存Tiling数据
     ge::graphStatus PostTiling() override;
 
 protected:
