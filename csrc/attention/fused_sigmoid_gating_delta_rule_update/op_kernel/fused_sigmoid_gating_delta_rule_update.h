@@ -456,7 +456,6 @@ private:
         LocalTensor<float> gamaLocal = gamaInQueue_.AllocTensor<float>();
         Cast(gamaLocal, aLocal, AscendC::RoundMode::CAST_NONE, bBatchSize);
         Cast(betaInUb, bLocal, AscendC::RoundMode::CAST_NONE, bBatchSize);
-        aInQueue_.FreeTensor(aLocal);
         bInQueue_.FreeTensor(bLocal);
 
         for (uint64_t i = 0; i < static_cast<uint64_t>(seqLen) * NV_; ++i) {
@@ -483,7 +482,7 @@ private:
             if (softplusBeta_ != 1.0f) {
                 softplusValue = softplusValue / softplusBeta_;
             }
-            float x = ToFloat(aGm_.GetValue(seq0 * NV_ + i)) + dtBiasInUb.GetValue(headIdx);
+            float x = ToFloat(aLocal.GetValue(i)) + dtBiasInUb.GetValue(headIdx);
             if (x > softplusThreshold_) {
                 softplusValue = x;
             }
@@ -493,6 +492,7 @@ private:
         }
         Exp(gamaLocal, gamaLocal, seqLen * NV_);
         AscendC::PipeBarrier<PIPE_V>();
+        aInQueue_.FreeTensor(aLocal);
         gamaInQueue_.EnQue<float>(gamaLocal);
         gamaInUb = gamaInQueue_.DeQue<float>();
     }

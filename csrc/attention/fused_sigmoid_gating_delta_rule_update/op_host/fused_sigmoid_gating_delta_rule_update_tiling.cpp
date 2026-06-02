@@ -322,7 +322,7 @@ ge::graphStatus FusedSigmoidGatingDeltaRuleUpdateTiling::CheckShapeValueRangeAnd
                         tilingData_.nk, tilingData_.nv, tilingData_.dk, tilingData_.dv),
                 return ge::GRAPH_FAILED);
 
-    OP_CHECK_IF(tilingData_.nv % tilingData_.nk != 0,
+    OP_CHECK_IF(tilingData_.nk == 0 || tilingData_.nv % tilingData_.nk != 0,
                 OP_LOGE(inputParams_.opName,
                         "nv should be an integer multiple of nk, but nv is %u, nk is %u",
                         tilingData_.nv, tilingData_.nk),
